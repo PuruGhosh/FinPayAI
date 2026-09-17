@@ -1,0 +1,5 @@
+Faker>=37,<38
+PyYAML>=6,<7
+chromadb>=0.5,<1
+python-dotenv>=1,<2
+langgraph>=1,<2
