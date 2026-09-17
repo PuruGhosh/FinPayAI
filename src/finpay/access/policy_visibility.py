@@ -10,10 +10,12 @@ def allowed_visibility_tags(
     known_tags: Iterable[str] = (),
 ) -> frozenset[str]:
     """Return the policy visibility tags permitted for ``context``."""
+    # Public users receive a hard public-only boundary before Chroma is queried.
     if context.user_type == "external":
         return frozenset({"public"})
 
     tags = {"public", "all_internal", f"dept:{context.department}"}
+    # Admin visibility is expanded from known metadata, never from the prompt.
     if context.role == "admin":
         tags.add("admin_only")
         tags.update(tag for tag in known_tags if tag.startswith("dept:"))

@@ -15,12 +15,14 @@ POLICY_DIR = DATA_DIR / "policies"
 
 conn = sqlite3.connect(DB_PATH)
 cur = conn.cursor()
+# Rebuild the audit mirror so it matches the current policy frontmatter.
 cur.execute("DELETE FROM doc_metadata")
 
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 
 rows = []
 for path in sorted(POLICY_DIR.glob("*.md")):
+    # Store the same visibility metadata later used by Chroma retrieval.
     with path.open(encoding="utf-8") as f:
         content = f.read()
     m = FRONTMATTER_RE.match(content)

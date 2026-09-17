@@ -45,6 +45,7 @@ class FakeClient:
 
 class PolicyIngestionTests(unittest.TestCase):
     def test_all_policy_files_are_chunked_with_security_metadata(self):
+    # Every chunk must retain the metadata needed for later authorization.
         chunks = load_policy_chunks(POLICY_DIR, chunk_size=500)
         self.assertGreater(len(chunks), 10)
         self.assertEqual(10, len({chunk.metadata["doc_id"] for chunk in chunks}))
@@ -62,6 +63,7 @@ class PolicyIngestionTests(unittest.TestCase):
             load_policy_chunks(POLICY_DIR, chunk_size=0)
 
     def test_reingestion_skips_unchanged_chunks(self):
+        # Stable IDs make repeated ingestion safe and inexpensive.
         chunks = [
             PolicyChunk("POL-001-chunk-0000", "public text", {"visibility": "public"}),
             PolicyChunk("POL-002-chunk-0000", "internal text", {"visibility": "all_internal"}),

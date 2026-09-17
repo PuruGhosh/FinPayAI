@@ -20,6 +20,7 @@ class PolicyChunk:
 
 
 def _parse_policy(path: Path) -> tuple[dict[str, Any], str]:
+    # Frontmatter is the source of truth for retrieval visibility metadata.
     content = path.read_text(encoding="utf-8")
     match = FRONTMATTER_RE.match(content)
     if not match:
@@ -33,6 +34,7 @@ def _parse_policy(path: Path) -> tuple[dict[str, Any], str]:
 
 
 def _chunk_text(text: str, chunk_size: int) -> list[str]:
+    # Keep paragraphs together when possible, then split unusually long paragraphs.
     paragraphs = [part.strip() for part in text.split("\n\n") if part.strip()]
     chunks: list[str] = []
     current = ""
@@ -105,6 +107,7 @@ def ingest_policy_chunks(
     )
 
     def synchronize(collection: Any, selected: list[PolicyChunk]) -> None:
+        # Synchronize by stable chunk ID so repeated ingestion is idempotent.
         desired = {chunk.chunk_id: chunk for chunk in selected}
         existing = collection.get(include=["documents", "metadatas"])
         existing_by_id = {

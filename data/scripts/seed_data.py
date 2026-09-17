@@ -12,6 +12,7 @@ Faker.seed(42)
 random.seed(42)
 
 DATA_DIR = Path(__file__).resolve().parents[1]
+# Recreate the disposable demo database from the checked-in schema.
 DB_PATH = DATA_DIR / "db" / "finpay_poc.db"
 SCHEMA_PATH = DATA_DIR / "db" / "schema.sql"
 
@@ -27,6 +28,7 @@ with SCHEMA_PATH.open(encoding="utf-8") as f:
 # ----------------------------------------------------------------------
 # DEPARTMENTS
 # ----------------------------------------------------------------------
+# Departments are the primary scope values used by access-control queries.
 DEPARTMENTS = [
     ("FIN", "Finance", "CC-100"),
     ("HR", "Human Resources", "CC-200"),
@@ -45,6 +47,7 @@ for dept_id, name, cc in DEPARTMENTS:
 # ----------------------------------------------------------------------
 # EMPLOYEES
 # ----------------------------------------------------------------------
+# Employees include synthetic identity and contact data for access tests.
 ROLE_TITLES = {
     "FIN": ["Finance Analyst", "Accounts Manager", "Finance Lead"],
     "HR": ["HR Executive", "Recruiter", "HR Manager"],
@@ -137,6 +140,7 @@ for dept_id, name, cc in DEPARTMENTS:
 # ----------------------------------------------------------------------
 # CUSTOMERS
 # ----------------------------------------------------------------------
+# Customer records intentionally contain PII so masking rules can be exercised.
 customers = []
 for i in range(60):
     cid = f"CUST{i+1:05d}"

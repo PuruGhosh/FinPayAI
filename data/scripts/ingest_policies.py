@@ -24,12 +24,15 @@ EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 def create_chroma_client():
     host = os.getenv("CHROMA_HOST")
     if host:
+    # Use the configured server for shared ingestion when available.
         port = int(os.getenv("CHROMA_PORT", "8000"))
         return chromadb.HttpClient(host=host, port=port)
+    # Persistent local storage supports the no-server POC setup.
     return chromadb.PersistentClient(path=str(CHROMA_DIR))
 
 
 def main() -> None:
+    # Parse policy files once, then synchronize both physical collections.
     chunks = load_policy_chunks(POLICY_DIR)
     client = create_chroma_client()
     embedding_function = DefaultEmbeddingFunction()

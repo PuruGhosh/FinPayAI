@@ -12,10 +12,14 @@ the LLM must never receive data outside the current user's permitted scope.
 
 ### Repository structure
 
+- `README.md` documents setup, architecture, access rules, commands, and
+	troubleshooting.
 - `data/` contains static policies, database schema, generated demo data, and
 	data-ingestion scripts.
 - `src/finpay/` contains application code.
 - `tests/` contains automated tests.
+- Application, data-script, and test modules include comments at their main
+	security and control-flow boundaries.
 - `.env` contains local Chroma connection settings and is excluded by
 	`.gitignore`.
 
@@ -36,8 +40,10 @@ the LLM must never receive data outside the current user's permitted scope.
 - External users are denied structured-data access.
 - Employees and managers are restricted to their department.
 - Admins can query across departments.
-- Employee and customer PII is masked unless an employee is viewing their
-	own employee record.
+- Internal users can see employee names, work email, and work phone within
+	their permitted scope.
+- Sensitive employee and customer PII is masked unless an employee is viewing
+	their own employee record.
 - SQL resources and filter columns are allowlisted; callers cannot provide
 	arbitrary SQL.
 
@@ -71,54 +77,116 @@ the LLM must never receive data outside the current user's permitted scope.
 - Ingestion is idempotent by chunk ID. Unchanged chunks are skipped; new,
 	changed, and stale chunks are synchronized.
 
+### Chroma policy retrieval
+
+- `src/finpay/policies/retrieval.py` provides the graph-compatible policy
+	retrieval tool.
+- External users can query only `finpay_public_policies`.
+- Internal users query `finpay_internal_policies` with a visibility filter
+	built from their trusted `UserContext`.
+- Every returned chunk is checked again with `can_view_policy()` before it is
+	allowed into the LLM context.
+- The graph accepts `chroma_client=...` and creates this policy tool
+	automatically; callers can still inject a custom `policy_tool`.
+
 ### LangGraph orchestration
 
 - The access-first graph is in `src/finpay/graph/workflow.py`.
+- The graph now uses named agent stages: `intent_agent`, `orchestrator`,
+	`policy_agent`, `structured_data_agent`, `self_service_agent`,
+	`answer_agent`, and `guardrail_agent`.
 - `ConversationState` carries the trusted `UserContext`, message, intent,
 	route, and response.
 - External users are hard-routed to the public-only route before any internal
 	tool can be called.
 - Internal intents route to policy retrieval, structured-data access, or
 	self-service lookup.
+- Clear employee-directory questions and common policy questions such as
+	"notice period" have deterministic routing fallbacks when the LLM classifier
+	is uncertain.
 - Unknown internal intents are denied by default.
-- The current graph nodes return placeholder responses; real SQLite and
-	Chroma tool calls are the next implementation step.
+- Structured-data and self-service routes now call an injected tool; the
+	default implementation delegates to `scoped_select` when given a SQLite
+	connection.
+- Policy and external routes now call an injected policy tool, allowing the
+	application to enforce `policy_visibility` before querying Chroma.
+- Safe tool results are carried in graph state; self-service always uses the
+	trusted session `user_id` and ignores requested employee filters.
+
+### Guardrail agent
+
+- `src/finpay/graph/guardrail.py` checks the generated response for likely
+	emails, IBANs, and long raw number sequences.
+- Responses containing likely raw PII are replaced with a safe denial message
+	before they reach Streamlit.
+- Internal directory emails and phones are allowed by the guardrail; external
+	responses remain blocked from exposing contact details.
+- Guardrail tests verify that masked values remain allowed and raw values are
+	blocked.
+
+### LLM integration
+
+- `src/finpay/graph/llm.py` uses LangChain's `ChatGroq` integration rather
+	than direct HTTP requests.
+- Groq configuration is loaded from `.env` through `GROQ_API_KEY` and
+	`GROQ_MODEL`.
+- The graph can use the adapter for intent classification before routing and
+	answer synthesis after scoped results are returned.
+- Intent classification is constrained to the supported intent values and
+	does not make access-control decisions.
+- Answer synthesis receives only results already filtered and masked by the
+	application.
+- If Groq answer generation fails, the answer agent returns only the already
+	authorized tool results instead of failing the request or retrieving more
+	data. Sanitized provider error details are logged for diagnosis.
+- The current configured model is `qwen/qwen3.8-27b` from `GROQ_MODEL`.
+
+### Streamlit interface
+
+- `app.py` provides the mock login and chat session scaffold.
+- The session builds `UserContext` from the selected user type, role,
+	department, and demo employee.
+- SQLite, Chroma, and LangChain Groq are initialized through cached resources.
+- Chroma uses the configured HTTP server when available and falls back to the
+	local `data/chroma` database when the server is unavailable.
+- Structured-data resource selection is passed to the scoped application tool;
+	users cannot provide raw SQL.
 
 #### Current graph
 
 ```mermaid
 flowchart TD
-	START([Start]) --> ROUTE[Access-first route node]
-	ROUTE -->|user_type = external| EXTERNAL[External route\npublic-only tools]
-	ROUTE -->|intent = policy| POLICY[Policy route\nscoped Chroma retrieval]
-	ROUTE -->|intent = structured_data| DATA[Structured-data route\nscoped SQLite access]
-	ROUTE -->|intent = self_service| SELF[Self-service route\nuser-scoped lookup]
-	ROUTE -->|unknown or unsupported intent| DENIED[Denied route]
-	EXTERNAL --> END([End])
-	POLICY --> END
-	DATA --> END
-	SELF --> END
+	START([Start]) --> INTENT[Intent agent]
+	INTENT --> ORCH[Orchestrator]
+	ORCH -->|external| EXTERNAL[Public policy agent]
+	ORCH -->|policy| POLICY[Policy agent]
+	ORCH -->|structured_data| DATA[Structured-data agent]
+	ORCH -->|self_service| SELF[Self-service agent]
+	ORCH -->|unknown| DENIED[Denied route]
+	EXTERNAL --> ANSWER[Answer agent]
+	POLICY --> ANSWER
+	DATA --> ANSWER
+	SELF --> ANSWER
+	ANSWER --> GUARD[Guardrail agent]
+	GUARD --> END([End])
 	DENIED --> END
 ```
 
 ## Validation
 
-The full test suite currently passes 15 tests:
+The full test suite currently passes 31 tests:
 
 ```powershell
-d:/Develpment/Projects/FastPayAI/.venv/Scripts/python.exe -m unittest discover -s tests -v
+d:/Develpment/Projects/FinPayAI/.venv/Scripts/python.exe -m unittest discover -s tests -v
 ```
 
 The main dependencies are recorded in `requirements.txt`: Faker, PyYAML,
-ChromaDB, python-dotenv, and LangGraph.
+ChromaDB, python-dotenv, LangGraph, LangChain Groq, and Streamlit.
 
 ## Not implemented yet
 
-1. Connect scoped SQL and Chroma tools to the graph.
-2. Complete the external-user walled-off subgraph with public retrieval.
-3. Add the Streamlit login/session scaffold.
-4. Add the output PII guardrail node.
-5. Add LangSmith traces and the permission evaluation dataset.
+1. Add LangSmith traces for user, role, department, route, and tool calls.
+2. Add the permission evaluation dataset and adversarial regression cases.
 
 ## Open decisions
 

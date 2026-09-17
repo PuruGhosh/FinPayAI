@@ -71,11 +71,13 @@ def scoped_select(
     Filters are equality predicates only. The function never accepts SQL from
     the caller, and scope predicates are always added before execution.
     """
+    # External sessions never reach SQLite, regardless of requested resource.
     if context.user_type == "external":
         raise AccessDenied("external users cannot access structured data")
     if resource not in RESOURCE_CONFIG:
         raise ValueError(f"unsupported resource: {resource}")
 
+    # Resource and filter allowlists prevent the caller from supplying SQL.
     config = RESOURCE_CONFIG[resource]
     filters = filters or {}
     allowed_filter_columns = {config["id_column"], config["scope_column"]}
@@ -94,6 +96,7 @@ def scoped_select(
 
     where = ["1 = 1"]
     values: list[Any] = []
+    # Department scope is the default; admins are the only cross-department role.
     if context.role == "admin":
         if resource == "offers":
             where.append("visibility IN ('public', 'all_internal')")
@@ -108,12 +111,16 @@ def scoped_select(
     query = f"SELECT * FROM {config['table']} WHERE {' AND '.join(where)}"
     rows = [dict(row) for row in connection.execute(query, values).fetchall()]
 
+    # Mask after retrieval so every returned row obeys the same PII policy.
     for row in rows:
         can_view_own_pii = resource == "employees" and (
             context.role != "admin" and row[config["id_column"]] == context.user_id
         )
         if not can_view_own_pii:
-            for column in PII_COLUMNS.get(resource, set()):
+            columns_to_mask = PII_COLUMNS.get(resource, set()).copy()
+            if resource == "employees" and context.user_type == "internal":
+                columns_to_mask -= {"email", "phone"}
+            for column in columns_to_mask:
                 if column in row:
                     row[column] = "[MASKED]"
 
